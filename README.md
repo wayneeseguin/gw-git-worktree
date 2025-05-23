@@ -1,8 +1,8 @@
-# Git Worktree Switcher :zap:
+# `gw` - Git Worktree
 
-A high-performance Git worktree management tool that combines fast switching with complete Git worktree command support. Built in modern Perl with comprehensive shell integration.
+A Git worktree management tool that combines fast switching with complete Git worktree command support. Built in Perl with comprehensive shell integration.
 
-Original inspiration was git-worktree-switcher by Yankee Maharjan, but this is a complete ground-up rewrite with a focus on testability, and features.
+Credit: Original inspiration was git-worktree-switcher by Yankee Maharjan. This is a complete ground-up rewrite with a focus on testability, feature support, shell integration.
 
 ## Features
 
