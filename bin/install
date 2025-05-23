@@ -1,0 +1,134 @@
+#!/usr/bin/env perl
+# vim: set ft=perl ts=2 sw=2 sts=2
+
+use strict;
+use warnings;
+use utf8;
+use v5.20;
+use File::Copy;
+use File::Path qw(make_path);
+use File::Basename;
+
+my $script_dir = dirname(__FILE__);
+my $project_root = dirname($script_dir);
+
+# Installation paths
+my $bin_dest = "/usr/local/bin";
+my $completion_dest = "/usr/local/share";
+
+# Shell RC files
+my $bash_rc = "$ENV{HOME}/.bashrc";
+my $zsh_rc = "$ENV{HOME}/.zshrc";
+
+sub install_binary {
+  print "Installing gw to $bin_dest/gw\n";
+
+  # Ensure destination directory exists
+  make_path($bin_dest) unless -d $bin_dest;
+
+  # Copy and set permissions
+  copy("$script_dir/gw", "$bin_dest/gw") or die "Failed to copy gw: $!";
+  chmod 0755, "$bin_dest/gw" or die "Failed to set permissions: $!";
+
+  print "✓ Installed gw binary\n";
+}
+
+sub install_completions {
+  print "Installing shell completions\n";
+
+  # Bash completion
+  my $bash_completion_dir = "$completion_dest/bash-completion/completions";
+  make_path($bash_completion_dir) unless -d $bash_completion_dir;
+  copy("$project_root/completions/bash/gw", "$bash_completion_dir/gw")
+    or die "Failed to copy bash completion: $!";
+  print "✓ Installed bash completion\n";
+
+  # Zsh completion
+  my $zsh_completion_dir = "$completion_dest/zsh/site-functions";
+  make_path($zsh_completion_dir) unless -d $zsh_completion_dir;
+  copy("$project_root/completions/zsh/gw", "$zsh_completion_dir/_gw")
+    or die "Failed to copy zsh completion: $!";
+  print "✓ Installed zsh completion\n";
+
+  # Fish completion
+  my $fish_completion_dir = "$completion_dest/fish/vendor_completions.d";
+  make_path($fish_completion_dir) unless -d $fish_completion_dir;
+  copy("$project_root/completions/fish/gw", "$fish_completion_dir/gw.fish")
+    or die "Failed to copy fish completion: $!";
+  print "✓ Installed fish completion\n";
+}
+
+sub update_shell_rc {
+  my ($rc_file, $shell_name, $eval_line) = @_;
+
+  return unless -f $rc_file;
+
+  # Read existing content
+  open my $fh, '<', $rc_file or die "Cannot read $rc_file: $!";
+  my $content = do { local $/; <$fh> };
+  close $fh;
+
+  # Check if already configured
+  if ($content =~ /eval.*gw.*completion/m) {
+    print "✓ $shell_name completion already configured in $rc_file\n";
+    return;
+  }
+
+  # Append configuration
+  open $fh, '>>', $rc_file or die "Cannot write to $rc_file: $!";
+  print $fh "\n# gw completion\n$eval_line\n";
+  close $fh;
+
+  print "✓ Added $shell_name completion to $rc_file\n";
+}
+
+sub update_shell_configs {
+  print "Updating shell configuration files\n";
+
+  # Update .bashrc if it exists
+  if (-f $bash_rc) {
+    update_shell_rc($bash_rc, "bash", 'eval "$(gw completion bash)"');
+  }
+
+  # Update .zshrc if it exists
+  if (-f $zsh_rc) {
+    update_shell_rc($zsh_rc, "zsh", 'eval "$(gw completion zsh)"');
+  }
+
+  # Note about fish
+  print "Note: Fish completions are automatically loaded from the vendor directory\n";
+}
+
+sub check_permissions {
+  unless ($> == 0) {
+    print "Warning: Not running as root. You may need to use sudo for system-wide installation.\n";
+    print "Proceeding anyway...\n\n";
+  }
+}
+
+sub main {
+  print "Installing git worktree switcher (gw)\n";
+  print "=====================================\n\n";
+
+  check_permissions();
+
+  eval {
+    install_binary();
+    install_completions();
+    update_shell_configs();
+
+    print "\n✓ Installation complete!\n";
+    print "\nTo enable completions in your current shell, run:\n";
+    print "  source ~/.bashrc  # for bash\n";
+    print "  source ~/.zshrc   # for zsh\n";
+    print "  # fish completions are automatically available\n";
+    print "\nOr start a new shell session.\n";
+  };
+
+  if ($@) {
+    print STDERR "\n✗ Installation failed: $@\n";
+    exit 1;
+  }
+}
+
+main();

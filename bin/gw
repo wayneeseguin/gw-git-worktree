@@ -1,0 +1,472 @@
+#!/usr/bin/env perl
+# vim: set ft=perl ts=2 sw=2 sts=2
+
+use strict;
+use warnings;
+use utf8;
+use v5.20;
+use feature qw(signatures say);
+no warnings qw(experimental::signatures);
+
+use Cwd qw(abs_path);
+use File::Basename qw(dirname basename);
+use File::Spec::Functions qw(catfile);
+use Getopt::Long qw(GetOptionsFromArray);
+use List::Util qw(first);
+use POSIX qw(getppid);
+
+# Git Worktree Switcher
+# Switch between git worktrees with speed and manage them with full Git worktree command support.
+
+our $VERSION = '0.2.0';
+
+package WorktreeSwitcher {
+
+  sub new($class, %args) {
+    my $self = bless {
+      version         => $VERSION,
+      binary_path     => Cwd::abs_path($0),
+      release_api_url => 'https://api.github.com/repos/yankeexe/git-worktree-switcher/releases/latest',
+      jq_url          => 'https://stedolan.github.io/jq/download',
+      args            => [],
+      %args
+    }, $class;
+
+    return $self;
+  }
+
+  sub run($self, @args) {
+    $self->{args} = \@args;
+
+    return $self->show_help unless @args;
+
+    my $command = shift @args;
+
+    # Command dispatch table
+    my %commands = (
+      'list'    => sub { $self->cmd_list(@args) },
+      'add'     => sub { $self->cmd_add(@args) },
+      'lock'    => sub { $self->cmd_lock(@args) },
+      'move'    => sub { $self->cmd_move(@args) },
+      'prune'   => sub { $self->cmd_prune(@args) },
+      'remove'  => sub { $self->cmd_remove(@args) },
+      'rm'      => sub { $self->cmd_remove(@args) },
+      'repair'  => sub { $self->cmd_repair(@args) },
+      'unlock'  => sub { $self->cmd_unlock(@args) },
+      'shell'   => sub { $self->cmd_shell(@args) },
+      'update'  => sub { $self->cmd_update(@args) },
+      'help'    => sub { $self->show_help },
+      'version' => sub { $self->show_version },
+      '-'       => sub { $self->goto_main_worktree },
+    );
+
+    if (exists $commands{$command}) {
+      return $commands{$command}->();
+    } else {
+      return $self->switch_worktree($command);
+    }
+  }
+
+  sub cmd_list($self, @args) {
+    my ($verbose, $porcelain, $null_terminate) = (0, 0, 0);
+
+    Getopt::Long::GetOptionsFromArray(\@args,
+      'v|verbose'   => \$verbose,
+      'porcelain'   => \$porcelain,
+      'z'           => \$null_terminate,
+    ) or die "Invalid options for list command\n";
+
+    my @cmd = ('git', 'worktree', 'list');
+
+    if ($verbose) {
+      push @cmd, '-v';
+    } elsif ($porcelain) {
+      push @cmd, '--porcelain';
+      push @cmd, '-z' if $null_terminate;
+    }
+
+    return $self->execute_command(@cmd);
+  }
+
+  sub cmd_add($self, @args) {
+    my %opts = (
+      force       => 0,
+      detach      => 0,
+      checkout    => 1,
+      lock        => 0,
+      lock_reason => '',
+      orphan      => 0,
+      branch      => '',
+      branch_force => 0,
+    );
+
+    # Configure Getopt::Long to allow bundling and case sensitivity
+    local $Getopt::Long::bundling = 0;
+    local $Getopt::Long::ignorecase = 0;
+
+    Getopt::Long::GetOptionsFromArray(\@args,
+      'f|force'        => \$opts{force},
+      'detach'         => \$opts{detach},
+      'checkout!'      => \$opts{checkout},
+      'lock'           => \$opts{lock},
+      'reason=s'       => \$opts{lock_reason},
+      'orphan'         => \$opts{orphan},
+      'b=s'            => sub { $opts{branch} = $_[1]; $opts{branch_force} = 0; },
+      'B=s'            => sub { $opts{branch} = $_[1]; $opts{branch_force} = 1; },
+    ) or die "Invalid options for add command\n";
+
+    die "Error: <path> is required for 'gw add'\n" unless @args;
+
+    my $path = shift @args;
+    my $commit = shift @args // '';
+
+    my @cmd = ('git', 'worktree', 'add');
+
+    push @cmd, '-f' if $opts{force};
+    push @cmd, '--detach' if $opts{detach};
+    push @cmd, '--no-checkout' unless $opts{checkout};
+    push @cmd, '--lock' if $opts{lock};
+    push @cmd, '--reason', $opts{lock_reason} if $opts{lock_reason};
+    push @cmd, '--orphan' if $opts{orphan};
+
+    if ($opts{branch}) {
+      push @cmd, $opts{branch_force} ? '-B' : '-b', $opts{branch};
+    }
+
+    push @cmd, $path;
+    push @cmd, $commit if $commit;
+
+    return $self->execute_command(@cmd);
+  }
+
+  sub cmd_lock($self, @args) {
+    my $reason = '';
+
+    Getopt::Long::GetOptionsFromArray(\@args,
+      'reason=s' => \$reason,
+    ) or die "Invalid options for lock command\n";
+
+    die "Error: <worktree> is required for 'gw lock'\n" unless @args;
+
+    my $worktree = shift @args;
+    my @cmd = ('git', 'worktree', 'lock');
+
+    push @cmd, '--reason', $reason if $reason;
+    push @cmd, $worktree;
+
+    return $self->execute_command(@cmd);
+  }
+
+  sub cmd_move($self, @args) {
+    die "Error: 'gw move' requires <worktree> <new-path>\n" unless @args == 2;
+
+    my ($worktree, $new_path) = @args;
+    return $self->execute_command('git', 'worktree', 'move', $worktree, $new_path);
+  }
+
+  sub cmd_prune($self, @args) {
+    my ($dry_run, $verbose, $expire) = (0, 0, '');
+
+    Getopt::Long::GetOptionsFromArray(\@args,
+      'n|dry-run' => \$dry_run,
+      'v|verbose' => \$verbose,
+      'expire=s'  => \$expire,
+    ) or die "Invalid options for prune command\n";
+
+    my @cmd = ('git', 'worktree', 'prune');
+
+    push @cmd, '-n' if $dry_run;
+    push @cmd, '-v' if $verbose;
+    push @cmd, '--expire', $expire if $expire;
+
+    return $self->execute_command(@cmd);
+  }
+
+  sub cmd_remove($self, @args) {
+    my $force = 0;
+
+    Getopt::Long::GetOptionsFromArray(\@args,
+      'f|force' => \$force,
+    ) or die "Invalid options for remove command\n";
+
+    die "Error: <worktree> is required for 'gw remove'\n" unless @args;
+
+    my $worktree = shift @args;
+    my @cmd = ('git', 'worktree', 'remove');
+
+    push @cmd, '-f' if $force;
+    push @cmd, $worktree;
+
+    return $self->execute_command(@cmd);
+  }
+
+  sub cmd_repair($self, @args) {
+    my @cmd = ('git', 'worktree', 'repair');
+    push @cmd, @args if @args;
+
+    return $self->execute_command(@cmd);
+  }
+
+  sub cmd_unlock($self, @args) {
+    die "Error: 'gw unlock' requires <worktree>\n" unless @args == 1;
+
+    my $worktree = shift @args;
+    return $self->execute_command('git', 'worktree', 'unlock', $worktree);
+  }
+
+  sub cmd_shell($self, @args) {
+    my $shell_type = $self->detect_shell();
+
+    if ($shell_type eq 'fish') {
+      return $self->emit_fish_function();
+    } else {
+      return $self->emit_bash_function();
+    }
+  }
+
+  sub cmd_update($self, @args) {
+    unless ($self->command_exists('jq')) {
+      say "jq is required for updating worktree switcher via this command.";
+      say "Install jq: " . $self->{jq_url};
+      my $release_url = $self->{release_api_url};
+      $release_url =~ s/api\.github\.com\/repos/github.com/;
+      $release_url =~ s/\/releases\/latest//;
+      say "Or visit: $release_url";
+      return 1;
+    }
+
+    return $self->check_release_version();
+  }
+
+  sub switch_worktree($self, $search_term) {
+    my $output = $self->capture_command('git', 'worktree', 'list', '--porcelain')
+      or die "Failed to get worktree list\n";
+
+    # Find worktree path that matches search term
+    my @lines = split /\n/, $output;
+    for my $line (@lines) {
+      if ($line =~ /^worktree (.+)$/) {
+        my $path = $1;
+        if ($path =~ /\Q$search_term\E/) {
+          say "Changing to worktree at: $path";
+          $self->change_directory($path);
+          return 0;
+        }
+      }
+    }
+
+    say "No worktree found matching: $search_term";
+    return 1;
+  }
+
+  sub goto_main_worktree($self) {
+    my $output = $self->capture_command('git', 'worktree', 'list', '--porcelain')
+      or return 1;
+
+    my ($main_worktree) = $output =~ /^worktree (.+)$/m;
+
+    if ($main_worktree) {
+      say "Changing to main worktree at: $main_worktree";
+      $self->change_directory($main_worktree);
+      return 0;
+    }
+
+    return 1;
+  }
+
+  sub change_directory($self, $directory) {
+    chdir $directory or die "Cannot change to directory $directory: $!\n";
+    exec $ENV{SHELL} if $ENV{SHELL};
+  }
+
+  sub detect_shell($self) {
+    return 'fish' if $ENV{FISH_VERSION};
+    return 'zsh'  if $ENV{ZSH_VERSION};
+    return 'bash' if $ENV{BASH_VERSION};
+
+    # Fallback to parent process
+    my $ppid = POSIX::getppid();
+    my $parent_proc = `ps -p $ppid -o comm= 2>/dev/null`;
+    chomp $parent_proc if $parent_proc;
+    $parent_proc = File::Basename::basename($parent_proc) if $parent_proc;
+
+    return $parent_proc if $parent_proc && $parent_proc =~ /^(bash|zsh|fish)$/;
+    return 'bash';  # Default fallback
+  }
+
+  sub emit_fish_function($self) {
+    print <<'EOF';
+function gw
+    set -l subcommands list add lock move prune remove rm repair unlock update help version shell
+
+    # If no arguments or it's a subcommand, call the real gw
+    if test (count $argv) -eq 0; or contains $argv[1] $subcommands
+        command gw $argv
+        return $status
+    end
+
+    # Handle worktree switching and special cases
+    switch $argv[1]
+        case '-'
+            # Switch to main worktree
+            set -l main_worktree (git worktree list --porcelain | grep -E 'worktree ' | awk '{print $0; exit}' | cut -d ' ' -f2-)
+            if test -n "$main_worktree"
+                echo "Changing to main worktree at: $main_worktree"
+                cd "$main_worktree"
+            end
+        case '*'
+            # Search for worktree and switch
+            set -l arg (echo $argv[1] | sed 's/\//\\\//g')
+            set -l directory (git worktree list --porcelain | grep -E 'worktree ' | awk '/'"$arg"'/ {print; exit}' | cut -d ' ' -f2-)
+            if test -n "$directory"
+                echo "Changing to worktree at: $directory"
+                cd "$directory"
+            else
+                echo "No worktree found matching: $argv[1]"
+                return 1
+            end
+    end
+end
+EOF
+    return 0;
+  }
+
+  sub emit_bash_function($self) {
+    print <<'EOF';
+gw() {
+    local subcommands="list add lock move prune remove rm repair unlock update help version shell"
+
+    # If no arguments or it's a subcommand, call the real gw
+    if [[ $# -eq 0 ]] || [[ " $subcommands " =~ " $1 " ]]; then
+        command gw "$@"
+        return $?
+    fi
+
+    # Handle worktree switching and special cases
+    case "$1" in
+        -)
+            # Switch to main worktree
+            local main_worktree
+            main_worktree=$(git worktree list --porcelain | grep -E 'worktree ' | awk '{print $0; exit}' | cut -d ' ' -f2-)
+            if [[ -n "$main_worktree" ]]; then
+                echo "Changing to main worktree at: $main_worktree"
+                cd "$main_worktree"
+            fi
+            ;;
+        *)
+            # Search for worktree and switch
+            local arg directory
+            arg=$(echo "$1" | sed 's/\//\\\//g')
+            directory=$(git worktree list --porcelain | grep -E 'worktree ' | awk '/'"$arg"'/ {print; exit}' | cut -d ' ' -f2-)
+            if [[ -n "$directory" ]]; then
+                echo "Changing to worktree at: $directory"
+                cd "$directory"
+            else
+                echo "No worktree found matching: $1"
+                return 1
+            fi
+            ;;
+    esac
+}
+EOF
+    return 0;
+  }
+
+  sub check_release_version($self) {
+    my $latest_release = $self->fetch_latest_release();
+    return 1 unless $latest_release;
+
+    my $latest_version = $latest_release->{tag_name};
+
+    if ($latest_version eq $self->{version}) {
+      say "You have the latest version of worktree switcher!";
+      say "Version: " . $self->{version};
+      return 0;
+    }
+
+    return $self->download_latest_update($latest_release);
+  }
+
+  sub fetch_latest_release($self) {
+    my $json_text = $self->capture_command('curl', '-sL', $self->{release_api_url});
+    return unless $json_text;
+
+    # Simple JSON parsing for just what we need
+    my ($tag_name) = $json_text =~ /"tag_name"\s*:\s*"([^"]+)"/;
+    my ($download_url) = $json_text =~ /"browser_download_url"\s*:\s*"([^"]+)"/;
+
+    return {
+      tag_name => $tag_name,
+      assets => [{ browser_download_url => $download_url }]
+    };
+  }
+
+  sub download_latest_update($self, $release) {
+    my $download_url = $release->{assets}[0]{browser_download_url};
+    return 1 unless $download_url;
+
+    say "Downloading latest version " . $release->{tag_name};
+
+    my $temp_file = "/tmp/gw_update_$$";
+    my $success = system('curl', '-sL', '-o', $temp_file, $download_url) == 0;
+    return 1 unless $success;
+
+    say "Updating to latest version...";
+    chmod 0755, $temp_file;
+
+    $success = system('sudo', 'mv', $temp_file, $self->{binary_path}) == 0;
+    unlink $temp_file;
+
+    if ($success) {
+      say "You are using the latest version of worktree switcher: " . $release->{tag_name};
+      return 0;
+    }
+
+    return 1;
+  }
+
+  sub execute_command($self, @cmd) {
+    say "Executing: " . join(' ', @cmd);
+    return system(@cmd) >> 8;
+  }
+
+  sub capture_command($self, @cmd) {
+    my $output = `@cmd 2>/dev/null`;
+    return $? == 0 ? $output : undef;
+  }
+
+  sub command_exists($self, $command) {
+    return system("command -v $command >/dev/null 2>&1") == 0;
+  }
+
+  sub show_help($self) {
+    say "gw lets you switch between your git worktrees with speed.\n";
+    say "Usage:";
+    say "\tgw <worktree-name>: search for worktree names and change to that directory.";
+    say "\tgw list [-v | --porcelain [-z]]: list out all the git worktrees.";
+    say "\tgw add [-f] [--detach] [--checkout] [--lock [--reason <string>]] [--orphan] [(-b | -B) <new-branch>] <path> [<commit-ish>]: add a new worktree.";
+    say "\tgw lock [--reason <string>] <worktree>: prevent a worktree from being pruned, moved or deleted.";
+    say "\tgw move <worktree> <new-path>: move a worktree to a new location.";
+    say "\tgw prune [-n] [-v] [--expire <expire>]: prune worktree information.";
+    say "\tgw remove [-f] <worktree>: remove a worktree.";
+    say "\tgw repair [<path>...]: repair worktree administrative files.";
+    say "\tgw unlock <worktree>: unlock a worktree.";
+    say "\tgw shell: emit shell function for in-shell directory switching (use with eval \"\$(gw shell)\").";
+    say "\tgw update: update to the latest release of worktree switcher.";
+    say "\tgw version: show the CLI version.";
+    say "\tgw help: shows this help message.";
+    say "\tgw -: switch to main/root worktree.";
+    return 0;
+  }
+
+  sub show_version($self) {
+    say "Version: " . $self->{version};
+    return 0;
+  }
+}
+
+# Main execution
+package main {
+  my $app = WorktreeSwitcher->new();
+  exit $app->run(@ARGV);
+}

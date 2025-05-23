@@ -1,0 +1,105 @@
+#compdef gw
+
+# AUTOCOMPLETION FOR ZSH
+# Reference: https://zsh.sourceforge.io/Doc/Release/Completion-Widgets.html
+
+_gw() {
+    local context state line
+    typeset -A opt_args
+
+    # Built-in commands
+    local commands=(
+        'list:list all git worktrees'
+        'add:add a new worktree'
+        'lock:prevent a worktree from being pruned, moved or deleted'
+        'move:move a worktree to a new location'
+        'prune:prune worktree information'
+        'remove:remove a worktree'
+        'rm:remove a worktree (alias)'
+        'repair:repair worktree administrative files'
+        'unlock:unlock a worktree'
+        'shell:emit shell function for in-shell directory switching'
+        'help:show help message'
+        'update:update to latest release'
+        'version:show CLI version'
+        '-:go to main worktree'
+    )
+
+    # Get worktree names for completion
+    local worktrees=()
+    if command -v gw >/dev/null 2>&1; then
+        local list_output
+        list_output="$(gw list 2>/dev/null | awk '{ print $1; }')" 
+        if [[ -n "$list_output" ]]; then
+            while IFS= read -r item; do
+                if [[ -n "$item" ]]; then
+                    worktrees+=("$(basename -- "$item"):worktree")
+                fi
+            done <<< "$list_output"
+        fi
+    fi
+
+    case $CURRENT in
+        2)
+            # First argument: complete subcommands and worktree names
+            _describe 'commands' commands
+            _describe 'worktrees' worktrees
+            ;;
+        3)
+            # Second argument: depends on the subcommand
+            case ${words[2]} in
+                add)
+                    _path_files -/
+                    ;;
+                lock|move|remove|rm|unlock)
+                    _describe 'worktrees' worktrees
+                    ;;
+                list)
+                    _arguments \
+                        '-v[verbose output]' \
+                        '--verbose[verbose output]' \
+                        '--porcelain[porcelain output]' \
+                        '-z[null-terminated output]'
+                    ;;
+                prune)
+                    _arguments \
+                        '-n[dry run]' \
+                        '--dry-run[dry run]' \
+                        '-v[verbose output]' \
+                        '--verbose[verbose output]' \
+                        '--expire[expire time]:expire time:'
+                    ;;
+                repair)
+                    _path_files -/
+                    ;;
+            esac
+            ;;
+        4)
+            # Third argument
+            case ${words[2]} in
+                move)
+                    _path_files -/
+                    ;;
+                add)
+                    _arguments \
+                        '-f[force]' \
+                        '--force[force]' \
+                        '--detach[detach HEAD]' \
+                        '--checkout[checkout after creation]' \
+                        '--no-checkout[do not checkout after creation]' \
+                        '--lock[lock the worktree]' \
+                        '--reason[reason for lock]:reason:' \
+                        '--orphan[create orphan branch]' \
+                        '-b[create new branch]:branch name:' \
+                        '-B[create or reset branch]:branch name:'
+                    ;;
+                lock)
+                    _arguments \
+                        '--reason[reason for lock]:reason:'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_gw "$@"

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+
+# AUTOCOMPLETION FOR BASH
+# Reference: https://www.gnu.org/software/bash/manual/html_node/A-Programmable-Completion-Example.html
+
+# gw list: list all the available worktrees
+# | awk '{ print $1; }': grab the first column of the output
+# | tr "\n" " ": replace line break character with space to put the worktrees on single line
+# separated by space
+
+_gw() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    
+    # Subcommands
+    local subcommands="list add lock move prune remove rm repair unlock shell update help version"
+    
+    # Get worktree list for completion
+    local worktrees=""
+    if command -v gw >/dev/null 2>&1; then
+        worktrees="$(gw list 2>/dev/null | awk '{ print $1; }' | tr "\n" " " 2>/dev/null || true)"
+    fi
+    
+    local worktree_names=""
+    for item in $worktrees; do
+        worktree_names+="$(basename -- "$item") "
+    done
+
+    case ${COMP_CWORD} in
+        1)
+            # First argument: complete subcommands and worktree names
+            COMPREPLY=($(compgen -W "$subcommands $worktree_names" -- "$cur"))
+            ;;
+        2)
+            # Second argument: depends on the subcommand
+            case ${COMP_WORDS[1]} in
+                add)
+                    # For add, complete with file paths
+                    COMPREPLY=($(compgen -d -- "$cur"))
+                    ;;
+                lock|move|remove|rm|unlock)
+                    # For these commands, complete with worktree names
+                    COMPREPLY=($(compgen -W "$worktree_names" -- "$cur"))
+                    ;;
+                list)
+                    # For list, complete with flags
+                    COMPREPLY=($(compgen -W "-v --verbose --porcelain -z" -- "$cur"))
+                    ;;
+                prune)
+                    # For prune, complete with flags
+                    COMPREPLY=($(compgen -W "-n --dry-run -v --verbose --expire" -- "$cur"))
+                    ;;
+                repair)
+                    # For repair, complete with file paths
+                    COMPREPLY=($(compgen -d -- "$cur"))
+                    ;;
+            esac
+            ;;
+        3)
+            # Third argument: depends on the subcommand
+            case ${COMP_WORDS[1]} in
+                move)
+                    # For move, second argument is destination path
+                    COMPREPLY=($(compgen -d -- "$cur"))
+                    ;;
+                add)
+                    # For add, could be commit-ish or flags
+                    if [[ ${cur} == -* ]]; then
+                        COMPREPLY=($(compgen -W "-f --force --detach --checkout --no-checkout --lock --reason --orphan -b -B" -- "$cur"))
+                    fi
+                    ;;
+                lock)
+                    # For lock, complete with flags
+                    if [[ ${cur} == -* ]]; then
+                        COMPREPLY=($(compgen -W "--reason" -- "$cur"))
+                    fi
+                    ;;
+            esac
+            ;;
+        *)
+            # For add command, continue completing flags
+            if [[ ${COMP_WORDS[1]} == "add" && ${cur} == -* ]]; then
+                COMPREPLY=($(compgen -W "-f --force --detach --checkout --no-checkout --lock --reason --orphan -b -B" -- "$cur"))
+            elif [[ ${COMP_WORDS[1]} == "lock" && ${cur} == -* ]]; then
+                COMPREPLY=($(compgen -W "--reason" -- "$cur"))
+            fi
+            ;;
+    esac
+}
+
+# complete
+#   -F: take function as completion provider
+#   _gw: name of the function
+#   gw: name of the command this completion is meant for
+complete -F _gw gw

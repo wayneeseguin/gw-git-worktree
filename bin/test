@@ -1,0 +1,174 @@
+#!/usr/bin/env perl
+# vim: set ft=perl ts=2 sw=2 sts=2
+
+use strict;
+use warnings;
+use utf8;
+use v5.20;
+use feature qw(signatures say);
+no warnings qw(experimental::signatures);
+
+# Enable proper UTF-8 output
+binmode(STDOUT, ':utf8');
+binmode(STDERR, ':utf8');
+
+use File::Basename qw(dirname);
+use Cwd qw(abs_path);
+
+# Test runner for gw (Git Worktree Switcher)
+
+my $script_dir = dirname(abs_path(__FILE__));
+my $project_root = dirname($script_dir);
+
+sub check_dependencies {
+  say "Checking dependencies...";
+
+  # Check if perl is available (obviously available if we're running)
+  say "✓ Perl is available";
+
+  # Check if Test::More is available
+  eval { require Test::More; 1 } or do {
+    say "✗ Error: Perl Test::More module is required";
+    say "Install with: cpan Test::More";
+    exit 1;
+  };
+  say "✓ Test::More module available";
+
+  # Check if we're in a git repository
+  unless (-d "$project_root/.git") {
+    say "✗ Warning: Not in a git repository - some tests may fail";
+  } else {
+    say "✓ Git repository detected";
+  }
+
+  say "";
+}
+
+sub run_test_file($file, $description) {
+  my $test_path = "$project_root/t/$file";
+
+  unless (-f $test_path) {
+    say "✗ Test file not found: $test_path";
+    return 0;
+  }
+
+  say "Running $description...";
+  my $exit_code = system($^X, $test_path);
+
+  if ($exit_code == 0) {
+    say "✓ $description passed";
+    return 1;
+  } else {
+    say "✗ $description failed (exit code: " . ($exit_code >> 8) . ")";
+    return 0;
+  }
+}
+
+sub show_summary {
+  say "";
+  say "Test Summary:";
+  say "=============";
+  say "✓ Basic commands (help, version, list)";
+  say "✓ Shell integration";
+  say "✓ Git repository operations";
+  say "✓ Worktree management commands";
+  say "✓ Error handling";
+  say "✓ Command aliases";
+  say "✓ Worktree switching";
+  say "✓ Advanced options and flags";
+  say "✓ Directory independence";
+  say "✓ Shell completions (bash/zsh/fish)";
+  say "✓ Completion functionality";
+  say "✓ Completion integration";
+  say "";
+}
+
+sub run_tests {
+  my @tests = (
+    { file => "basic.t", description => "basic functionality tests" },
+    { file => "gw.t", description => "comprehensive functionality tests" },
+    { file => "completions.t", description => "shell completion tests" },
+  );
+
+  my $total_tests = @tests;
+  my $passed_tests = 0;
+
+  for my $test (@tests) {
+    say "";
+    if (run_test_file($test->{file}, $test->{description})) {
+      $passed_tests++;
+    }
+  }
+
+  say "";
+  say "Results: $passed_tests/$total_tests tests passed";
+
+  if ($passed_tests == $total_tests) {
+    say "🎉 All tests completed successfully!";
+    show_summary();
+    return 0;
+  } else {
+    say "❌ Some tests failed";
+    return 1;
+  }
+}
+
+sub show_help {
+  say "gw Test Runner";
+  say "==============";
+  say "";
+  say "Usage: bin/test [options]";
+  say "";
+  say "Options:";
+  say "  -h, --help     Show this help message";
+  say "  -v, --verbose  Run tests with verbose output";
+  say "";
+  say "Test files:";
+  say "  t/basic.t        Quick smoke tests";
+  say "  t/gw.t           Comprehensive functionality tests";
+  say "  t/completions.t  Shell completion tests";
+  say "";
+  say "Dependencies:";
+  say "  - Perl 5.20+";
+  say "  - Test::More module";
+  say "  - Git (for repository operations)";
+}
+
+sub main {
+  # Parse command line arguments
+  my $verbose = 0;
+  my $help = 0;
+
+  for my $arg (@ARGV) {
+    if ($arg eq '-h' || $arg eq '--help') {
+      $help = 1;
+    } elsif ($arg eq '-v' || $arg eq '--verbose') {
+      $verbose = 1;
+    } else {
+      say "Unknown option: $arg";
+      say "Use --help for usage information";
+      exit 1;
+    }
+  }
+
+  if ($help) {
+    show_help();
+    return 0;
+  }
+
+  # Set verbose mode if requested
+  $ENV{TEST_VERBOSE} = 1 if $verbose;
+
+  say "Running Perl test suite for gw...";
+  say "==================================";
+  say "";
+
+  check_dependencies();
+
+  # Change to project root for relative paths
+  chdir $project_root or die "Cannot change to project root: $!";
+
+  return run_tests();
+}
+
+exit main();

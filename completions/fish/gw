@@ -1,0 +1,68 @@
+# AUTOCOMPLETION FOR FISH
+# Reference: https://fishshell.com/docs/current/completions.html
+
+# Get worktree names for completion
+function __gw_worktrees
+    if command -q gw
+        gw list 2>/dev/null | awk '{ print $1; }' | while read -l item
+            if test -n "$item"
+                basename -- "$item"
+            end
+        end
+    end
+end
+
+# Subcommands
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'list' -d 'list all git worktrees'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'add' -d 'add a new worktree'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'lock' -d 'prevent a worktree from being pruned, moved or deleted'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'move' -d 'move a worktree to a new location'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'prune' -d 'prune worktree information'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'remove' -d 'remove a worktree'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'rm' -d 'remove a worktree (alias)'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'repair' -d 'repair worktree administrative files'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'unlock' -d 'unlock a worktree'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'shell' -d 'emit shell function for in-shell directory switching'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'update' -d 'update to latest release'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'help' -d 'show help message'
+complete -c gw -f -n '__fish_is_nth_token 1' -a 'version' -d 'show CLI version'
+complete -c gw -f -n '__fish_is_nth_token 1' -a '-' -d 'go to main worktree'
+
+# Complete worktree names for the first argument (switching)
+complete -c gw -f -n '__fish_is_nth_token 1' -a '(__gw_worktrees)'
+
+# Complete for list subcommand
+complete -c gw -f -n '__fish_is_nth_token 2; and __fish_seen_subcommand_from list' -s v -l verbose -d 'verbose output'
+complete -c gw -f -n '__fish_is_nth_token 2; and __fish_seen_subcommand_from list' -l porcelain -d 'porcelain output'
+complete -c gw -f -n '__fish_is_nth_token 2; and __fish_seen_subcommand_from list' -s z -d 'null-terminated output'
+
+# Complete for add subcommand
+complete -c gw -F -n '__fish_is_nth_token 2; and __fish_seen_subcommand_from add'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -s f -l force -d 'force'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -l detach -d 'detach HEAD'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -l checkout -d 'checkout after creation'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -l no-checkout -d 'do not checkout after creation'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -l lock -d 'lock the worktree'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -l orphan -d 'create orphan branch'
+complete -c gw -f -n '__fish_seen_subcommand_from add' -s b -d 'create new branch' -r
+complete -c gw -f -n '__fish_seen_subcommand_from add' -s B -d 'create or reset branch' -r
+
+# Complete worktree names for commands that need them
+complete -c gw -f -n '__fish_is_nth_token 2; and __fish_seen_subcommand_from lock move remove rm unlock' -a '(__gw_worktrees)'
+
+# Complete for move subcommand (second argument is destination)
+complete -c gw -F -n '__fish_is_nth_token 3; and __fish_seen_subcommand_from move'
+
+# Complete for prune subcommand
+complete -c gw -f -n '__fish_seen_subcommand_from prune' -s n -l dry-run -d 'dry run'
+complete -c gw -f -n '__fish_seen_subcommand_from prune' -s v -l verbose -d 'verbose output'
+complete -c gw -f -n '__fish_seen_subcommand_from prune' -l expire -d 'expire time' -r
+
+# Complete for remove subcommand
+complete -c gw -f -n '__fish_seen_subcommand_from remove rm' -s f -l force -d 'force'
+
+# Complete for repair subcommand
+complete -c gw -F -n '__fish_seen_subcommand_from repair'
+
+# Complete for lock subcommand
+complete -c gw -f -n '__fish_seen_subcommand_from lock' -l reason -d 'lock reason' -r
