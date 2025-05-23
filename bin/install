@@ -69,17 +69,17 @@ sub update_shell_rc {
   close $fh;
 
   # Check if already configured
-  if ($content =~ /eval.*gw.*completion/m) {
-    print "✓ $shell_name completion already configured in $rc_file\n";
+  if ($content =~ /eval.*\$\(gw shell/m || $content =~ /gw shell.*\|.*source/m) {
+    print "✓ $shell_name shell integration already configured in $rc_file\n";
     return;
   }
 
   # Append configuration
   open $fh, '>>', $rc_file or die "Cannot write to $rc_file: $!";
-  print $fh "\n# gw completion\n$eval_line\n";
+  print $fh "\n# gw shell integration\n$eval_line\n";
   close $fh;
 
-  print "✓ Added $shell_name completion to $rc_file\n";
+  print "✓ Added $shell_name shell integration to $rc_file\n";
 }
 
 sub update_shell_configs {
@@ -87,12 +87,12 @@ sub update_shell_configs {
 
   # Update .bashrc if it exists
   if (-f $bash_rc) {
-    update_shell_rc($bash_rc, "bash", 'eval "$(gw shell bash)"');
+    update_shell_rc($bash_rc, "bash", 'eval "$(gw shell)"');
   }
 
   # Update .zshrc if it exists
   if (-f $zsh_rc) {
-    update_shell_rc($zsh_rc, "zsh", 'eval "$(gw shell zsh)"');
+    update_shell_rc($zsh_rc, "zsh", 'eval "$(gw shell)"');
   }
 
   # Note about fish
