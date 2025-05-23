@@ -87,12 +87,12 @@ sub update_shell_configs {
 
   # Update .bashrc if it exists
   if (-f $bash_rc) {
-    update_shell_rc($bash_rc, "bash", 'eval "$(gw completion bash)"');
+    update_shell_rc($bash_rc, "bash", 'eval "$(gw shell bash)"');
   }
 
   # Update .zshrc if it exists
   if (-f $zsh_rc) {
-    update_shell_rc($zsh_rc, "zsh", 'eval "$(gw completion zsh)"');
+    update_shell_rc($zsh_rc, "zsh", 'eval "$(gw shell zsh)"');
   }
 
   # Note about fish
